@@ -23,12 +23,20 @@ enum TextInjector {
 
     static func insert(_ text: String, forcePasteboard: Bool = false) {
         guard !text.isEmpty else { return }
-        if !forcePasteboard, insertViaAccessibility(text) {
-            Log.write("  injected via Accessibility")
+
+        let target = NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"
+
+        // Accessibility insertion is cleaner, but a lot of apps — Electron
+        // ones especially — accept the write, report success and do nothing
+        // with it. There's no reliable way to verify synchronously, so it's
+        // off by default: the pasteboard round-trip actually works everywhere.
+        if !forcePasteboard, Settings.shared.useAccessibilityInsert,
+           insertViaAccessibility(text) {
+            Log.write("  injected via Accessibility → \(target)")
             return
         }
         insertViaPasteboard(text)
-        Log.write("  injected via clipboard paste")
+        Log.write("  injected via clipboard paste → \(target)")
     }
 
     /// Some apps refuse synthetic keystrokes while secure input is on — a

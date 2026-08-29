@@ -70,6 +70,7 @@ final class Settings {
         static let saveHistory = "saveHistory"
         static let hasLaunched = "hasLaunched"
         static let unloadAfterIdle = "unloadAfterIdle"
+        static let useAccessibilityInsert = "useAccessibilityInsert"
         static let idleMinutes = "idleMinutes"
     }
 
@@ -123,6 +124,13 @@ final class Settings {
     var remoteModel: String {
         get { defaults.string(forKey: Key.remoteModel) ?? "llama-3.3-70b-versatile" }
         set { defaults.set(newValue, forKey: Key.remoteModel) }
+    }
+
+    /// Try the Accessibility API before the pasteboard. Off by default —
+    /// it silently fails in Electron apps, which is worse than clipboard churn.
+    var useAccessibilityInsert: Bool {
+        get { defaults.object(forKey: Key.useAccessibilityInsert) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.useAccessibilityInsert) }
     }
 
     /// The Whisper model is a few hundred MB resident. Drop it when unused.
