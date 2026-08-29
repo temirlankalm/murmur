@@ -272,11 +272,18 @@ enum Diagnostics {
 
     /// `Murmur --test-cleanup` — same round-trip as the Test button.
     @MainActor
-    static func testCleanup() async {
+    static func testCleanup(modelOverride: String?, sampleOverride: String? = nil) async {
+        let saved = Settings.shared.remoteModel
+        if let modelOverride { Settings.shared.remoteModel = modelOverride }
+        defer { Settings.shared.remoteModel = saved }
+
         print("endpoint: \(Settings.shared.remoteBaseURL)")
         print("model:    \(Settings.shared.remoteModel)")
         print("key:      \(Keychain.get(RemoteCleanup.keychainAccount)?.isEmpty == false ? "set" : "none (fine for a local server)")")
-        print(await RemoteCleanup().test())
+
+        let started = Date()
+        let outcome = await RemoteCleanup().test(sample: sampleOverride)
+        print(String(format: "%.1fs  %@", Date().timeIntervalSince(started), outcome))
     }
 
     /// `Murmur --test-edit "make this formal"` — selects all in the frontmost
@@ -302,6 +309,22 @@ enum Diagnostics {
             print("rewritten: \(rewritten)")
             TextInjector.insert(rewritten)
             print("injected")
+        } catch {
+            print("failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// `Murmur --remote-models` — what the cleanup endpoint will accept.
+    @MainActor
+    static func listRemoteModels() async {
+        print("endpoint: \(Settings.shared.remoteBaseURL)")
+        do {
+            let models = try await RemoteCleanup().availableModels()
+            guard !models.isEmpty else { print("the endpoint listed no models"); return }
+            let current = Settings.shared.remoteModel
+            for model in models {
+                print("  \(model == current ? "→" : " ") \(model)")
+            }
         } catch {
             print("failed: \(error.localizedDescription)")
         }

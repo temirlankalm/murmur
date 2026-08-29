@@ -58,8 +58,13 @@ if let instruction = flagValue("--test-edit") {
     dispatchMain()
 }
 
+if CommandLine.arguments.contains("--remote-models") {
+    Task { @MainActor in await Diagnostics.listRemoteModels(); exit(0) }
+    dispatchMain()
+}
+
 if CommandLine.arguments.contains("--test-cleanup") {
-    Task { @MainActor in await Diagnostics.testCleanup(); exit(0) }
+    Task { @MainActor in await Diagnostics.testCleanup(modelOverride: flagValue("--model"), sampleOverride: flagValue("--sample")); exit(0) }
     dispatchMain()
 }
 

@@ -189,10 +189,28 @@ struct RemoteCleanup: CleanupProvider {
         return Cleanup.sanitize(content, fallback: text, allowGrowth: true)
     }
 
+    /// Ask the endpoint what it can actually run. Wrong model names are the
+    /// most common misconfiguration, and the error they produce is unhelpful.
+    func availableModels() async throws -> [String] {
+        let base = Settings.shared.remoteBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: base + "/models") else { throw URLError(.badURL) }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        if let key = Keychain.get(Self.keychainAccount), !key.isEmpty {
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, _) = try await URLSession.shared.data(for: request)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let entries = json?["data"] as? [[String: Any]] ?? []
+        return entries.compactMap { $0["id"] as? String }.sorted()
+    }
+
     /// Round-trips a short phrase so a misconfigured endpoint shows up here
     /// rather than as a silently unchanged transcript later.
-    func test() async -> String {
-        let sample = "um so i was thinking we should uh ship this on friday"
+    func test(sample: String? = nil) async -> String {
+        let sample = sample ?? "um so i was thinking we should uh ship this on friday"
         do {
             let result = try await clean(sample, vocabulary: [], context: nil)
             return result == sample
