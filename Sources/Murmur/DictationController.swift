@@ -175,7 +175,8 @@ final class DictationController {
     // MARK: - The loop
 
     private func beginDictation() {
-        Log.write("key down (status=\(status))")
+        let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"
+        Log.write("key down (status=\(status), front app=\(front))")
         guard status == .idle else { Log.write("  ignored — not idle"); return }
         idleUnload?.cancel()
         setStatus(.listening)
@@ -267,7 +268,16 @@ final class DictationController {
             guard !cancelled else { Log.write("  cancelled"); return }
             guard !raw.isEmpty else {
                 setStatus(.idle)
-                overlay.flash(.error("Didn't catch that."), seconds: 1.4)
+                // Distinguish "you said nothing" from "the mic barely heard
+                // you" — a low input volume looks identical otherwise, and
+                // sends people hunting through the wrong settings.
+                let tooQuiet = maxLevel < 0.08
+                overlay.flash(.error(tooQuiet
+                    ? "Too quiet — raise input volume in Sound settings"
+                    : "Didn't catch that."), seconds: tooQuiet ? 3 : 1.4)
+                Log.write(tooQuiet
+                    ? "  nothing transcribed — input level only \(String(format: "%.3f", maxLevel))"
+                    : "  nothing transcribed")
                 return
             }
 
