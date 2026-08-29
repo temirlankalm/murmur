@@ -63,6 +63,58 @@ import Foundation
     #expect(WhisperBackend.hasSpeech(tone) == true)
 }
 
+// MARK: - Where the text is going
+
+@Test func recognisesTerminalsAndEditors() {
+    #expect(DictationContext.kind(forBundleID: "com.apple.Terminal") == .terminal)
+    #expect(DictationContext.kind(forBundleID: "com.googlecode.iterm2") == .terminal)
+    #expect(DictationContext.kind(forBundleID: "com.microsoft.VSCode") == .editor)
+    #expect(DictationContext.kind(forBundleID: "com.apple.dt.Xcode") == .editor)
+}
+
+@Test func recognisesChatAndMail() {
+    #expect(DictationContext.kind(forBundleID: "ru.keepcoder.Telegram") == .chat)
+    #expect(DictationContext.kind(forBundleID: "com.anthropic.claudefordesktop") == .chat)
+    #expect(DictationContext.kind(forBundleID: "com.apple.mail") == .mail)
+}
+
+@Test func unknownAppsGetNoStyleHint() {
+    #expect(DictationContext.kind(forBundleID: "com.example.whatever") == .other)
+    #expect(DictationContext.kind(forBundleID: nil) == .other)
+    // No hint means the prompt stays as it was — nothing extra to mislead the model.
+    #expect(DictationContext.Kind.other.hint == nil)
+}
+
+@Test func contextOnlyEntersThePromptWhenItSaysSomething() {
+    let bare = Cleanup.prompt(for: "hello", vocabulary: [], context: nil)
+    #expect(!bare.contains("Where this is going"))
+
+    let terminal = DictationContext(appName: "Terminal", kind: .terminal)
+    let shaped = Cleanup.prompt(for: "hello", vocabulary: [], context: terminal)
+    #expect(shaped.contains("Where this is going"))
+    #expect(shaped.contains("Transcript:"))
+
+    // A browser has no useful style hint, so it must not pad the prompt.
+    let browser = DictationContext(appName: "Safari", kind: .browser)
+    #expect(!Cleanup.prompt(for: "hello", vocabulary: [], context: browser).contains("Where this is going"))
+}
+
+// MARK: - Cleanup endpoints
+
+@Test func localPresetsNeedNoKey() {
+    let local = CleanupPreset.all.filter { !$0.needsKey }
+    #expect(local.count >= 2)
+    // The point of the local ones: no account, nothing leaves the machine.
+    #expect(local.allSatisfy { $0.baseURL.contains("localhost") })
+}
+
+@Test func everyPresetIsAUsableEndpoint() {
+    for preset in CleanupPreset.all {
+        #expect(URL(string: preset.baseURL + "/chat/completions") != nil, "bad URL in \(preset.id)")
+        #expect(!preset.model.isEmpty, "no model for \(preset.id)")
+    }
+}
+
 // MARK: - Locale resolution
 //
 // Regression cover for the ru-KZ case: a system language with no model must
