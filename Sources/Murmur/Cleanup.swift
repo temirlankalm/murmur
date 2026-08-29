@@ -5,6 +5,8 @@ import FoundationModels
 /// filler words gone, punctuation in, "new paragraph" honoured as a command.
 protocol CleanupProvider {
     func clean(_ transcript: String, vocabulary: [String], context: DictationContext?) async throws -> String
+    /// Apply a spoken instruction to text the user has selected.
+    func rewrite(_ text: String, instruction: String) async throws -> String
 }
 
 enum Cleanup {
@@ -36,6 +38,20 @@ enum Cleanup {
         return parts.joined(separator: "\n\n")
     }
 
+    static let editInstructions = """
+    You rewrite text according to an instruction. You receive the instruction     and the text it applies to, and you return the rewritten text.
+
+    Rules:
+    - Apply the instruction and change nothing else.
+    - Keep the original language unless told to translate.
+    - Never comment on the change, explain it, or ask questions.
+    - Return only the rewritten text. No preamble, no quotes, no markdown fence.
+    """
+
+    static func editPrompt(text: String, instruction: String) -> String {
+        "Instruction:\n\(instruction)\n\nText:\n\(text)"
+    }
+
     static func provider(for mode: CleanupMode) -> CleanupProvider {
         switch mode {
         case .off:    return PassthroughCleanup()
@@ -45,7 +61,7 @@ enum Cleanup {
     }
 
     /// Strip anything a model might wrap the answer in despite being told not to.
-    static func sanitize(_ output: String, fallback: String) -> String {
+    static func sanitize(_ output: String, fallback: String, allowGrowth: Bool = false) -> String {
         var text = output.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.hasPrefix("```") {
             text = text
@@ -57,16 +73,29 @@ enum Cleanup {
         }
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // A model that "helpfully" answered instead of cleaning tends to balloon.
-        // Better to paste the raw transcript than someone else's essay.
-        guard !text.isEmpty, text.count < max(120, fallback.count * 3) else { return fallback }
+        // A model that "helpfully" answered instead of cleaning tends to
+        // balloon. Better to paste the raw transcript than someone else's
+        // essay. A deliberate rewrite ("expand this") may grow, so the cap
+        // is lifted there.
+        guard !text.isEmpty else { return fallback }
+        guard allowGrowth || text.count < max(120, fallback.count * 3) else { return fallback }
         return text
     }
 }
 
 struct PassthroughCleanup: CleanupProvider {
+    struct NoModel: LocalizedError {
+        var errorDescription: String? { "Voice editing needs a cleanup model. Set one in Settings." }
+    }
+
     func clean(_ transcript: String, vocabulary: [String], context: DictationContext?) async throws -> String {
         transcript
+    }
+
+    /// Nothing to rewrite with — say so rather than silently pasting the
+    /// instruction over the user's selection.
+    func rewrite(_ text: String, instruction: String) async throws -> String {
+        throw NoModel()
     }
 }
 
@@ -85,6 +114,13 @@ struct LocalCleanup: CleanupProvider {
         let response = try await session.respond(to: prompt)
         return Cleanup.sanitize(response.content, fallback: transcript)
     }
+
+    func rewrite(_ text: String, instruction: String) async throws -> String {
+        guard Self.isAvailable else { throw PassthroughCleanup.NoModel() }
+        let session = LanguageModelSession(instructions: Cleanup.editInstructions)
+        let response = try await session.respond(to: Cleanup.editPrompt(text: text, instruction: instruction))
+        return Cleanup.sanitize(response.content, fallback: text, allowGrowth: true)
+    }
 }
 
 /// Any OpenAI-compatible chat endpoint: a local Ollama or LM Studio, or a
@@ -93,18 +129,24 @@ struct RemoteCleanup: CleanupProvider {
     static let keychainAccount = "remote-api-key"
 
     func clean(_ transcript: String, vocabulary: [String], context: DictationContext?) async throws -> String {
+        let content = try await complete(
+            system: Cleanup.instructions,
+            user: Cleanup.prompt(for: transcript, vocabulary: vocabulary, context: context)
+        )
+        return Cleanup.sanitize(content, fallback: transcript)
+    }
+
+    private func complete(system: String, user: String) async throws -> String {
         let settings = Settings.shared
         guard let url = URL(string: settings.remoteBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/chat/completions") else {
             throw URLError(.badURL)
         }
 
-        let user = Cleanup.prompt(for: transcript, vocabulary: vocabulary, context: context)
-
         let body: [String: Any] = [
             "model": settings.remoteModel,
             "temperature": 0,
             "messages": [
-                ["role": "system", "content": Cleanup.instructions],
+                ["role": "system", "content": system],
                 ["role": "user", "content": user]
             ]
         ]
@@ -131,8 +173,20 @@ struct RemoteCleanup: CleanupProvider {
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let choices = json?["choices"] as? [[String: Any]]
         let message = choices?.first?["message"] as? [String: Any]
-        let content = message?["content"] as? String ?? transcript
-        return Cleanup.sanitize(content, fallback: transcript)
+        guard let content = message?["content"] as? String else {
+            throw NSError(domain: "Murmur", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "The endpoint returned no message content."
+            ])
+        }
+        return content
+    }
+
+    func rewrite(_ text: String, instruction: String) async throws -> String {
+        let content = try await complete(
+            system: Cleanup.editInstructions,
+            user: Cleanup.editPrompt(text: text, instruction: instruction)
+        )
+        return Cleanup.sanitize(content, fallback: text, allowGrowth: true)
     }
 
     /// Round-trips a short phrase so a misconfigured endpoint shows up here
