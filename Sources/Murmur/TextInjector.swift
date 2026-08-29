@@ -92,17 +92,53 @@ enum TextInjector {
         }
     }
 
+    /// Select everything in the focused field. Used by the diagnostics only —
+    /// real voice editing works on whatever the user has already selected.
+    static func selectAll() {
+        press(virtualKey: 0) // kVK_ANSI_A
+    }
+
+    /// Copy whatever is selected in the frontmost app.
+    ///
+    /// There's no reliable Accessibility route for this — the same apps that
+    /// won't accept an AX write won't report their selection either — so it's
+    /// ⌘C and a short wait for the pasteboard to change. The clipboard is put
+    /// back afterwards.
+    static func copySelection(timeout: TimeInterval = 0.5) async -> String? {
+        let pasteboard = NSPasteboard.general
+        let saved = snapshot(pasteboard)
+        let before = pasteboard.changeCount
+
+        press(virtualKey: 8) // kVK_ANSI_C
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if pasteboard.changeCount != before {
+                let text = pasteboard.string(forType: .string)
+                restore(saved, to: pasteboard)
+                return text?.isEmpty == false ? text : nil
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        restore(saved, to: pasteboard)
+        Log.write("  copySelection: pasteboard never changed (front app=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"))")
+        return nil
+    }
+
     private static func pressCommandV() {
+        press(virtualKey: 9) // kVK_ANSI_V
+    }
+
+    private static func press(virtualKey: CGKeyCode) {
         guard let source = CGEventSource(stateID: .combinedSessionState) else { return }
-        // Don't let a still-held modifier from the trigger key leak into the paste.
+        // Don't let a still-held modifier from the trigger key leak in.
         source.setLocalEventsFilterDuringSuppressionState(
             [.permitLocalMouseEvents, .permitSystemDefinedEvents],
             state: .eventSuppressionStateSuppressionInterval
         )
 
-        let vKey: CGKeyCode = 9 // kVK_ANSI_V
-        let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true)
-        let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false)
+        let down = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: false)
         down?.flags = .maskCommand
         up?.flags = .maskCommand
         down?.post(tap: .cghidEventTap)
