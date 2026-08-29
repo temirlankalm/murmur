@@ -11,7 +11,7 @@ Two speech engines, switchable from the menu bar:
 | | Apple `SpeechAnalyzer` | Whisper (CoreML) |
 | --- | --- | --- |
 | Languages | 9 | ~99 |
-| Live text as you speak | yes | no |
+| Live text as you speak | yes | yes (re-decoded every ~2s) |
 | Speed | instant | a beat after you finish |
 | First-run download | ~small, from Apple | a few hundred MB, from HuggingFace |
 
@@ -85,6 +85,8 @@ Other diagnostics, for when something doesn't work:
 | `--models` | which Whisper models are available |
 | `--test-cleanup` | does the configured cleanup endpoint answer? |
 | `--test-edit "make it formal"` | runs the voice-edit path on the current selection |
+| `--remote-models` | what the cleanup endpoint will actually accept |
+| `--test-cleanup --model X --sample "…"` | time a specific model on your own text |
 | `--press 5` | holds the trigger key for real, so a running Murmur dictates |
 
 Every dictation is traced to `~/Library/Application Support/Murmur/murmur.log`:
@@ -151,6 +153,15 @@ ollama pull qwen3:1.7b
 
 then pick **Ollama (local)** in the settings window and press Test.
 
+**Pick the model on latency, not size.** Cleanup sits between you releasing the
+key and the text appearing, so a reasoning model is the wrong tool. On the same
+Russian sentence, Groq's `gpt-oss-120b` took 8.0s and `gpt-oss-20b` took 1.0s —
+for byte-identical output. Measure yours:
+
+```bash
+./Murmur.app/Contents/MacOS/Murmur --test-cleanup --model openai/gpt-oss-20b --sample "your typical sentence"
+```
+
 Cleanup also knows *where* the text is going. The frontmost app is classified
 by bundle identifier, and a terminal is told to skip markdown, a code editor to
 leave identifiers alone, a chat not to invent greetings. Apps with nothing
@@ -195,8 +206,11 @@ your previous clipboard afterwards.
   watching!" and the like. Murmur gates on the loudest 100 ms window of the
   recording and simply doesn't call the model below it. Real speech measures
   around 0.2; room tone around 0.002; the floor sits at 0.004.
-- **Whisper has no live text.** It transcribes the whole utterance once you
-  release the key, so the overlay shows a waveform rather than words.
+- **Whisper's live text is an approximation.** It's a batch model, so the
+  preview re-decodes the audio so far every couple of seconds; wording can
+  change as more context arrives. The final pass still runs over the whole
+  recording, so accuracy is unaffected. Turn it off if the extra decoding
+  bothers your battery.
 - **Without a signing identity the build is ad-hoc signed**, and the
   Accessibility grant silently stops working after every rebuild — the checkbox
   stays ticked while the permission does nothing. See below.
