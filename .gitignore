@@ -1,0 +1,5 @@
+.build/
+Murmur.app/
+.DS_Store
+*.xcuserstate
+.signing-identity

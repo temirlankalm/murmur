@@ -1,0 +1,238 @@
+import AppKit
+import SwiftUI
+
+/// A real window, because a menu bar icon is easy to lose — on a notched
+/// MacBook with a full menu bar it can be invisible entirely. Re-opening
+/// Murmur from Finder or Spotlight brings this up.
+@MainActor
+final class SettingsWindow: NSObject, NSWindowDelegate {
+    private var window: NSWindow?
+    private let model: SettingsModel
+
+    init(controller: DictationController) {
+        model = SettingsModel(controller: controller)
+    }
+
+    func show() {
+        model.startPolling()
+
+        if let window {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Murmur"
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.contentView = NSHostingView(rootView: SettingsView(model: model))
+        window.center()
+        self.window = window
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        model.stopPolling()
+        window = nil
+    }
+}
+
+@MainActor
+final class SettingsModel: ObservableObject {
+    private let controller: DictationController
+
+    @Published var trigger: TriggerKey { didSet { Settings.shared.trigger = trigger } }
+    @Published var backend: BackendKind {
+        didSet {
+            guard backend != oldValue else { return }
+            Settings.shared.backend = backend
+            // The old language almost certainly isn't on the new engine's list.
+            Settings.shared.localeIdentifier = ""
+            locale = ""
+            controller.invalidateAssets()
+        }
+    }
+    @Published var locale: String {
+        didSet {
+            guard locale != oldValue else { return }
+            Settings.shared.localeIdentifier = locale
+            controller.invalidateAssets()
+        }
+    }
+    @Published var cleanup: CleanupMode { didSet { Settings.shared.cleanup = cleanup } }
+    @Published var playSounds: Bool { didSet { Settings.shared.playSounds = playSounds } }
+    @Published var unloadAfterIdle: Bool { didSet { Settings.shared.unloadAfterIdle = unloadAfterIdle } }
+    @Published var saveHistory: Bool {
+        didSet {
+            Settings.shared.saveHistory = saveHistory
+            if !saveHistory { History.shared.clear() }
+        }
+    }
+    @Published var vocabulary: String {
+        didSet {
+            Settings.shared.vocabulary = vocabulary
+                .split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
+    }
+    @Published var apiKey: String {
+        didSet { Keychain.set(apiKey, for: RemoteCleanup.keychainAccount) }
+    }
+
+    init(controller: DictationController) {
+        self.controller = controller
+        let settings = Settings.shared
+        trigger = settings.trigger
+        backend = settings.backend
+        locale = settings.localeIdentifier
+        cleanup = settings.cleanup
+        playSounds = settings.playSounds
+        unloadAfterIdle = settings.unloadAfterIdle
+        saveHistory = settings.saveHistory
+        vocabulary = settings.vocabulary.joined(separator: "\n")
+        apiKey = Keychain.get(RemoteCleanup.keychainAccount) ?? ""
+    }
+
+    var languages: [(id: String, name: String)] {
+        Backends.languages(for: backend).map { locale in
+            let id = locale.identifier(.bcp47)
+            return (id, Locale.current.localizedString(forIdentifier: locale.identifier) ?? id)
+        }
+    }
+
+    var localCleanupAvailable: Bool { LocalCleanup.isAvailable }
+
+    /// Permission state is granted in System Settings while this window is
+    /// already on screen, so it has to be polled — a plain computed property
+    /// would leave the window insisting the access is missing forever.
+    @Published private(set) var hasAccessibility = TextInjector.isTrusted
+    @Published private(set) var isArmed = false
+
+    private var pollTask: Task<Void, Never>?
+
+    func startPolling() {
+        guard pollTask == nil else { return }
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let trusted = TextInjector.isTrusted
+                let armed = self.controller.isArmed
+                if trusted != self.hasAccessibility { self.hasAccessibility = trusted }
+                if armed != self.isArmed { self.isArmed = armed }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    func stopPolling() {
+        pollTask?.cancel()
+        pollTask = nil
+    }
+}
+
+private struct SettingsView: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+
+            Form {
+                Section {
+                    Picker("Trigger key", selection: $model.trigger) {
+                        ForEach(TriggerKey.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    Picker("Engine", selection: $model.backend) {
+                        ForEach(BackendKind.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    Picker("Language", selection: $model.locale) {
+                        Text("Automatic").tag("")
+                        Divider()
+                        ForEach(model.languages, id: \.id) { Text("\($0.name) — \($0.id)").tag($0.id) }
+                    }
+                }
+
+                Section("Cleanup") {
+                    Picker("Mode", selection: $model.cleanup) {
+                        ForEach(CleanupMode.allCases, id: \.self) { mode in
+                            Text(mode == .local && !model.localCleanupAvailable
+                                 ? "\(mode.label) — unavailable"
+                                 : mode.label).tag(mode)
+                        }
+                    }
+                    if model.cleanup == .local && !model.localCleanupAvailable {
+                        Text("Apple Intelligence is off, so transcripts are pasted as heard. Turn it on in System Settings, or use a remote API.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if model.cleanup == .remote {
+                        SecureField("API key", text: $model.apiKey)
+                        Text("Stored in your login keychain. Endpoint: \(Settings.shared.remoteBaseURL)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Custom vocabulary") {
+                    TextEditor(text: $model.vocabulary)
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(height: 70)
+                    Text("Names and jargon the transcriber mangles, one per line.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Toggle("Play sounds", isOn: $model.playSounds)
+                    Toggle("Save history", isOn: $model.saveHistory)
+                    Toggle("Free memory when idle", isOn: $model.unloadAfterIdle)
+                    Text("Drops the speech model after \(Settings.shared.idleMinutes) minutes without dictating, saving a few hundred MB. The next dictation reloads it while it records — nothing is lost, that one is just slower.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    HStack {
+                        Spacer()
+                        Button("Quit Murmur") { NSApp.terminate(nil) }
+                        Spacer()
+                    }
+                }
+            }
+            .formStyle(.grouped)
+        }
+        .frame(width: 460, height: 520)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Hold \(model.trigger.label) to dictate")
+                .font(.system(size: 15, weight: .medium))
+            Text(status)
+                .font(.caption)
+                .foregroundStyle(model.isArmed ? Color.secondary : Color.red)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+    }
+
+    private var status: String {
+        if !model.hasAccessibility {
+            return "Needs Accessibility access in System Settings → Privacy & Security"
+        }
+        if !model.isArmed {
+            return "Access granted, but the key watcher isn't running — quit and reopen Murmur"
+        }
+        return "Listening for the trigger key · Esc cancels a dictation"
+    }
+}
