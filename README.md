@@ -100,7 +100,8 @@ Everything is configurable from the menu bar:
 
 - **Trigger key** — right ⌥, left ⌥, right ⌘, or fn
 - **Engine** — Apple or Whisper, plus which Whisper model to use
-- **Language** — whatever the current engine supports
+- **Language** — a specific one, your system language, or (on Whisper)
+  detected per dictation, so you can switch languages mid-session
 - **Cleanup** — off, on-device model, or a remote API
 - **Custom vocabulary** — names and jargon the transcriber keeps mangling
 - **Free memory when idle** — drops the speech model after a few minutes
@@ -119,12 +120,29 @@ transcript. Cleanup failing never costs you the words.
 
 Three modes:
 
-- **On-device model** — Apple's Foundation Model. Free, offline, needs Apple
-  Intelligence turned on in System Settings.
-- **Remote API** — any OpenAI-compatible endpoint (Groq, OpenAI, a local
-  llama.cpp server). Set the endpoint in `Settings.remoteBaseURL`, the key via
-  the menu (it's stored in your login keychain, never in preferences).
+- **Your own endpoint** — anything OpenAI-compatible, chosen in the settings
+  window. Presets for **Ollama** and **LM Studio**, both of which run on your
+  own machine and need no API key, plus Groq, OpenAI and OpenRouter for hosted
+  ones. There's a **Test** button, so a wrong endpoint says so instead of
+  quietly leaving your text unchanged. Keys live in the login keychain, never
+  in preferences.
+- **Apple's on-device model** — free and offline, but needs Apple Intelligence
+  turned on, and it has no Russian.
 - **Off** — paste exactly what was heard.
+
+The recommended fully-local setup:
+
+```bash
+brew install ollama
+ollama pull qwen3:1.7b
+```
+
+then pick **Ollama (local)** in the settings window and press Test.
+
+Cleanup also knows *where* the text is going. The frontmost app is classified
+by bundle identifier, and a terminal is told to skip markdown, a code editor to
+leave identifiers alone, a chat not to invent greetings. Apps with nothing
+useful to say about style add nothing to the prompt.
 
 ## How it works
 
