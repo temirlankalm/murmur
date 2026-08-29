@@ -88,6 +88,7 @@ final class Settings {
         static let unloadAfterIdle = "unloadAfterIdle"
         static let useAccessibilityInsert = "useAccessibilityInsert"
         static let activation = "activation"
+        static let liveText = "liveText"
         static let editTrigger = "editTrigger"
         static let idleMinutes = "idleMinutes"
     }
@@ -142,6 +143,13 @@ final class Settings {
     var remoteModel: String {
         get { defaults.string(forKey: Key.remoteModel) ?? "llama-3.3-70b-versatile" }
         set { defaults.set(newValue, forKey: Key.remoteModel) }
+    }
+
+    /// Show words as they're recognised, at the cost of decoding repeatedly
+    /// while you speak.
+    var liveText: Bool {
+        get { defaults.object(forKey: Key.liveText) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.liveText) }
     }
 
     /// Hold the key down, or tap once to start and again to stop.

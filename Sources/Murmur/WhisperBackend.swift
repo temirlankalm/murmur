@@ -16,8 +16,10 @@ final class WhisperBackend: SpeechBackend {
     }
 
     var onPartial: (String) -> Void = { _ in }
-    /// Whisper only speaks once the audio stops, so there's nothing live to show.
-    var supportsLiveText: Bool { false }
+    /// Whisper is a batch model, but re-running it on the audio so far every
+    /// couple of seconds is close enough to live, and it means most of the
+    /// utterance is already decoded by the time the key comes up.
+    var supportsLiveText: Bool { Settings.shared.liveText }
     private(set) var currentText = ""
 
     /// Shared across dictations — loading is expensive, keep it warm.
@@ -30,6 +32,10 @@ final class WhisperBackend: SpeechBackend {
 
     private var resampler: AudioResampler?
     private var samples: [Float] = []
+    private var liveTask: Task<Void, Never>?
+    /// Whisper instances aren't safe to drive concurrently, so partial runs
+    /// and the final one take turns through this.
+    private var transcribing = false
     private var language: String = "en"
     /// Let Whisper work out the language itself, instead of being told.
     private var autoDetect = false
@@ -144,6 +150,63 @@ final class WhisperBackend: SpeechBackend {
         language = locale.language.languageCode?.identifier ?? "en"
         detectedLanguage = nil
         resampler = AudioResampler(to: AudioResampler.whisperFormat)
+        startLiveUpdates()
+    }
+
+    // MARK: - Live text
+
+    private func startLiveUpdates() {
+        liveTask?.cancel()
+        guard Settings.shared.liveText else { return }
+
+        liveTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(1_800))
+                guard !Task.isCancelled, let self else { return }
+                await self.runPartial()
+            }
+        }
+    }
+
+    /// A best-effort pass over what's been said so far, purely for display.
+    /// Skipped whenever the model is busy, so slow hardware degrades to fewer
+    /// updates rather than a queue of stale ones.
+    private func runPartial() async {
+        guard !transcribing, let kit = Self.kit else { return }
+
+        // Below a second there's not enough to decode usefully.
+        let audio = recentSamples()
+        guard audio.count > 16_000, Self.hasSpeech(audio) else { return }
+
+        transcribing = true
+        defer { transcribing = false }
+
+        let options = DecodingOptions(
+            verbose: false,
+            task: .transcribe,
+            language: autoDetect ? nil : language,
+            temperature: 0,
+            detectLanguage: autoDetect,
+            skipSpecialTokens: true,
+            withoutTimestamps: true
+        )
+
+        guard let results = try? await Task.detached(priority: .utility, operation: {
+            try await kit.transcribe(audioArray: audio, decodeOptions: options)
+        }).value else { return }
+
+        let text = Self.tidy(results.map(\.text).joined(separator: " "))
+        guard !text.isEmpty, !Task.isCancelled else { return }
+        currentText = text
+        Log.write("  partial (\(audio.count / 16_000)s): \(text.prefix(50))")
+        onPartial(text)
+    }
+
+    /// The tail of the recording. Re-decoding a very long buffer every couple
+    /// of seconds costs more than the preview is worth.
+    private func recentSamples() -> [Float] {
+        let maxPreview = 16_000 * 30
+        return samples.count <= maxPreview ? samples : Array(samples.suffix(maxPreview))
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
@@ -153,9 +216,18 @@ final class WhisperBackend: SpeechBackend {
     }
 
     func finish() async -> String {
+        liveTask?.cancel()
+        liveTask = nil
+
+        // Let an in-flight preview finish before taking the model back.
+        while transcribing {
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+
         defer {
             samples = []
             resampler = nil
+            currentText = ""
         }
 
         // Recording may have started before the model finished loading. Take
