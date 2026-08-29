@@ -14,6 +14,9 @@ enum OverlayState: Equatable {
 @MainActor
 final class OverlayModel: ObservableObject {
     @Published var state: OverlayState = .hidden
+    /// What the pill says before any words arrive — different when the
+    /// dictation is an instruction rather than the text itself.
+    @Published var placeholder = "Listening…"
 }
 
 /// The little pill that floats above everything while you're dictating.
@@ -23,6 +26,11 @@ final class Overlay {
     private let model = OverlayModel()
     private var panel: NSPanel?
     private var dismissTask: Task<Void, Never>?
+
+    /// Set before showing; persists until changed.
+    func setPlaceholder(_ text: String) {
+        model.placeholder = text
+    }
 
     func show(_ state: OverlayState) {
         dismissTask?.cancel()
@@ -128,7 +136,7 @@ private struct OverlayView: View {
     private var content: some View {
         switch model.state {
         case .listening(let text, _):
-            Text(text.isEmpty ? "Listening…" : text)
+            Text(text.isEmpty ? model.placeholder : text)
                 .font(.system(size: 13))
                 .foregroundStyle(text.isEmpty ? .white.opacity(0.55) : .white)
                 .lineLimit(1)
