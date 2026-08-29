@@ -29,10 +29,14 @@ enum Diagnostics {
         let kind = Settings.shared.backend
         let resolved = await Backends.resolveLocale(for: kind)
         let chosen = Settings.shared.localeIdentifier
-        let source = chosen.isEmpty ? "auto from \(Locale.preferredLanguages.first ?? "?")" : "chosen"
-
         line("Engine", kind.label, ok: true)
-        line("Locale", "\(resolved.identifier(.bcp47)) (\(source))", ok: true)
+
+        if chosen == Settings.autoDetectLocale && kind == .whisper {
+            line("Locale", "detected per dictation (fallback \(resolved.identifier(.bcp47)))", ok: true)
+        } else {
+            let source = chosen.isEmpty ? "auto from \(Locale.preferredLanguages.first ?? "?")" : "chosen"
+            line("Locale", "\(resolved.identifier(.bcp47)) (\(source))", ok: true)
+        }
 
         switch kind {
         case .apple:
@@ -264,6 +268,15 @@ enum Diagnostics {
         post(down: false)
         CFRunLoopRunInMode(.defaultMode, 0.3, false)
         print("released")
+    }
+
+    /// `Murmur --test-cleanup` — same round-trip as the Test button.
+    @MainActor
+    static func testCleanup() async {
+        print("endpoint: \(Settings.shared.remoteBaseURL)")
+        print("model:    \(Settings.shared.remoteModel)")
+        print("key:      \(Keychain.get(RemoteCleanup.keychainAccount)?.isEmpty == false ? "set" : "none (fine for a local server)")")
+        print(await RemoteCleanup().test())
     }
 
     static func listModels() {

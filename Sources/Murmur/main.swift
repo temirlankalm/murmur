@@ -52,6 +52,11 @@ if CommandLine.arguments.contains("--focus") {
     dispatchMain()
 }
 
+if CommandLine.arguments.contains("--test-cleanup") {
+    Task { @MainActor in await Diagnostics.testCleanup(); exit(0) }
+    dispatchMain()
+}
+
 if CommandLine.arguments.contains("--models") {
     Task { @MainActor in Diagnostics.listModels(); exit(0) }
     dispatchMain()
