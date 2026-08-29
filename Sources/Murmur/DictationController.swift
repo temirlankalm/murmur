@@ -344,8 +344,10 @@ final class DictationController {
                 }
             } else if cleanupMode != .off {
                 do {
+                    let started = Date()
                     cleaned = try await Cleanup.provider(for: cleanupMode)
                         .clean(raw, vocabulary: Settings.shared.vocabulary, context: context)
+                    Log.write(String(format: "  cleanup took %.1fs", Date().timeIntervalSince(started)))
                 } catch {
                     // Cleanup is a nicety. Never lose the words over it.
                     Log.write("  cleanup failed, pasting raw — \(error.localizedDescription)")
