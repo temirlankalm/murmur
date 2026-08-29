@@ -83,6 +83,8 @@ Other diagnostics, for when something doesn't work:
 | `--focus 5` | what does Accessibility see in the focused field? |
 | `--paste "text"` | does injection land? `--clipboard` forces the fallback |
 | `--models` | which Whisper models are available |
+| `--test-cleanup` | does the configured cleanup endpoint answer? |
+| `--test-edit "make it formal"` | runs the voice-edit path on the current selection |
 | `--press 5` | holds the trigger key for real, so a running Murmur dictates |
 
 Every dictation is traced to `~/Library/Application Support/Murmur/murmur.log`:
@@ -96,6 +98,14 @@ cursor. A pill at the bottom of the screen shows what's being heard as you talk.
 
 Press **Esc** while dictating to throw it away and type nothing.
 
+**Edit by voice.** Select text anywhere, hold the edit key (right ⌥ by default,
+off until you set one) and say what to do with it — "make this formal",
+"translate to English", "shorter", "turn this into bullets". The selection is
+replaced with the result. Needs a cleanup model configured.
+
+**Hold or tap.** Hold-to-talk by default; switch to tap-to-start, tap-to-stop in
+settings if you dictate long passages.
+
 Everything is configurable from the menu bar:
 
 - **Trigger key** — right ⌥, left ⌥, right ⌘, or fn
@@ -106,6 +116,8 @@ Everything is configurable from the menu bar:
 - **Custom vocabulary** — names and jargon the transcriber keeps mangling
 - **Free memory when idle** — drops the speech model after a few minutes
   without dictating
+- **Usage** — words dictated, words per minute, and a conservative estimate of
+  time saved against typing at 40 wpm
 - **Recent** — the last 50 dictations, in case a paste goes somewhere unhelpful.
   Stored as plain JSON in `~/Library/Application Support/Murmur`; turn
   **Save history** off to keep nothing.
