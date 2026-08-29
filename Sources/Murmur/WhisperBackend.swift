@@ -31,6 +31,9 @@ final class WhisperBackend: SpeechBackend {
     private var resampler: AudioResampler?
     private var samples: [Float] = []
     private var language: String = "en"
+    /// Let Whisper work out the language itself, instead of being told.
+    private var autoDetect = false
+    private(set) var detectedLanguage: String?
 
     /// A generous ceiling so a stuck key can't eat all of memory.
     /// 16 kHz mono float ≈ 3.8 MB per minute.
@@ -137,7 +140,9 @@ final class WhisperBackend: SpeechBackend {
         currentText = ""
         samples = []
         samples.reserveCapacity(16_000 * 10)
+        autoDetect = Settings.shared.localeIdentifier == Settings.autoDetectLocale
         language = locale.language.languageCode?.identifier ?? "en"
+        detectedLanguage = nil
         resampler = AudioResampler(to: AudioResampler.whisperFormat)
     }
 
@@ -176,9 +181,12 @@ final class WhisperBackend: SpeechBackend {
         let options = DecodingOptions(
             verbose: false,
             task: .transcribe,
-            language: language,
+            // Passing nil is what lets the model choose; naming a language
+            // forces it, which is better when you know, and wrong when you
+            // switch between languages mid-session.
+            language: autoDetect ? nil : language,
             temperature: 0,
-            detectLanguage: false,
+            detectLanguage: autoDetect,
             skipSpecialTokens: true,
             withoutTimestamps: true,
             compressionRatioThreshold: 2.4,
@@ -194,6 +202,10 @@ final class WhisperBackend: SpeechBackend {
                 try await kit.transcribe(audioArray: audio, decodeOptions: options)
             }.value
             text = results.map(\.text).joined(separator: " ")
+            if autoDetect, let detected = results.first?.language {
+                detectedLanguage = detected
+                Log.write("  detected language: \(detected)")
+            }
         } catch {
             NSLog("Murmur: whisper transcription failed — \(error.localizedDescription)")
             return ""

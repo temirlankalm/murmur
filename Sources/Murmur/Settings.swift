@@ -54,6 +54,10 @@ enum CleanupMode: String, CaseIterable, Codable {
 /// Plain UserDefaults-backed settings. Deliberately boring.
 final class Settings {
     static let shared = Settings()
+
+    /// Sentinel for `localeIdentifier` meaning "let the engine detect it".
+    /// Distinct from empty, which means "infer from my system languages".
+    static let autoDetectLocale = "auto-detect"
     private let defaults = UserDefaults.standard
 
     private enum Key {
