@@ -50,6 +50,10 @@ final class SettingsModel: ObservableObject {
     private let controller: DictationController
 
     @Published var trigger: TriggerKey { didSet { Settings.shared.trigger = trigger } }
+    @Published var activation: ActivationMode { didSet { Settings.shared.activation = activation } }
+    @Published var editTrigger: String {
+        didSet { Settings.shared.editTrigger = TriggerKey(rawValue: editTrigger) }
+    }
     @Published var backend: BackendKind {
         didSet {
             guard backend != oldValue else { return }
@@ -113,6 +117,8 @@ final class SettingsModel: ObservableObject {
         self.controller = controller
         let settings = Settings.shared
         trigger = settings.trigger
+        activation = settings.activation
+        editTrigger = settings.editTrigger?.rawValue ?? "none"
         backend = settings.backend
         locale = settings.localeIdentifier
         cleanup = settings.cleanup
@@ -148,6 +154,13 @@ final class SettingsModel: ObservableObject {
         CleanupPreset.all.first { $0.baseURL == baseURL }
     }
 
+    @Published var statsSummary: String = Stats.shared.summary
+
+    func resetStats() {
+        Stats.shared.reset()
+        statsSummary = Stats.shared.summary
+    }
+
     var localCleanupAvailable: Bool { LocalCleanup.isAvailable }
 
     /// Permission state is granted in System Settings while this window is
@@ -167,6 +180,8 @@ final class SettingsModel: ObservableObject {
                 let armed = self.controller.isArmed
                 if trusted != self.hasAccessibility { self.hasAccessibility = trusted }
                 if armed != self.isArmed { self.isArmed = armed }
+                let summary = Stats.shared.summary
+                if summary != self.statsSummary { self.statsSummary = summary }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -187,8 +202,22 @@ private struct SettingsView: View {
 
             Form {
                 Section {
-                    Picker("Trigger key", selection: $model.trigger) {
+                    Picker("Dictate with", selection: $model.trigger) {
                         ForEach(TriggerKey.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    Picker("Activation", selection: $model.activation) {
+                        ForEach(ActivationMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    Picker("Edit selection with", selection: $model.editTrigger) {
+                        Text("Off").tag("none")
+                        ForEach(TriggerKey.allCases.filter { $0 != model.trigger }, id: \.self) {
+                            Text($0.label).tag($0.rawValue)
+                        }
+                    }
+                    if model.editTrigger != "none" {
+                        Text("Select text anywhere, hold this key and say what to do with it — \"make this formal\", \"translate to English\", \"shorter\". Needs a cleanup model.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     Picker("Engine", selection: $model.backend) {
                         ForEach(BackendKind.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -267,6 +296,14 @@ private struct SettingsView: View {
                     Text("Drops the speech model after \(Settings.shared.idleMinutes) minutes without dictating, saving a few hundred MB. The next dictation reloads it while it records — nothing is lost, that one is just slower.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                Section("Usage") {
+                    Text(model.statsSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Reset statistics") { model.resetStats() }
+                        .controlSize(.small)
                 }
 
                 Section {
