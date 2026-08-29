@@ -99,6 +99,34 @@ import Foundation
     #expect(!Cleanup.prompt(for: "hello", vocabulary: [], context: browser).contains("Where this is going"))
 }
 
+// MARK: - Voice editing
+
+@Test func editPromptCarriesBothHalves() {
+    let prompt = Cleanup.editPrompt(text: "ship it friday", instruction: "make this formal")
+    #expect(prompt.contains("make this formal"))
+    #expect(prompt.contains("ship it friday"))
+    // The instruction must come first, or a long selection buries it.
+    #expect(prompt.range(of: "Instruction:")!.lowerBound < prompt.range(of: "Text:")!.lowerBound)
+}
+
+@Test func aRewriteMayLegitimatelyGrow() {
+    let short = "ship it"
+    // No trailing space: sanitize trims, and the point here is the length cap.
+    let expanded = Array(repeating: "We intend to ship this release.", count: 8).joined(separator: " ")
+    // Cleanup rejects ballooning output, because that means the model answered
+    // instead of rewriting. An explicit "expand this" must not be rejected.
+    #expect(Cleanup.sanitize(expanded, fallback: short) == short)
+    #expect(Cleanup.sanitize(expanded, fallback: short, allowGrowth: true) == expanded)
+}
+
+@Test func voiceEditingRefusesWithoutAModel() async {
+    await #expect(throws: PassthroughCleanup.NoModel.self) {
+        // Pasting the spoken instruction over the selection would destroy it,
+        // so with no model configured this must fail loudly.
+        try await PassthroughCleanup().rewrite("some text", instruction: "make it formal")
+    }
+}
+
 // MARK: - Cleanup endpoints
 
 @Test func localPresetsNeedNoKey() {
