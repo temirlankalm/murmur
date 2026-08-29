@@ -87,6 +87,27 @@ final class SettingsModel: ObservableObject {
     @Published var apiKey: String {
         didSet { Keychain.set(apiKey, for: RemoteCleanup.keychainAccount) }
     }
+    @Published var baseURL: String { didSet { Settings.shared.remoteBaseURL = baseURL } }
+    @Published var remoteModel: String { didSet { Settings.shared.remoteModel = remoteModel } }
+    @Published var testResult: String?
+    @Published var testing = false
+
+    func apply(_ preset: CleanupPreset) {
+        baseURL = preset.baseURL
+        remoteModel = preset.model
+        testResult = nil
+    }
+
+    func testEndpoint() {
+        guard !testing else { return }
+        testing = true
+        testResult = nil
+        Task {
+            let outcome = await RemoteCleanup().test()
+            testing = false
+            testResult = outcome
+        }
+    }
 
     init(controller: DictationController) {
         self.controller = controller
@@ -100,6 +121,11 @@ final class SettingsModel: ObservableObject {
         saveHistory = settings.saveHistory
         vocabulary = settings.vocabulary.joined(separator: "\n")
         apiKey = Keychain.get(RemoteCleanup.keychainAccount) ?? ""
+        baseURL = settings.remoteBaseURL
+        remoteModel = settings.remoteModel
+        // didSet doesn't fire during init, so this reflects reality without
+        // overwriting a hand-edited endpoint.
+        presetID = CleanupPreset.all.first { $0.baseURL == settings.remoteBaseURL }?.id ?? ""
     }
 
     var languages: [(id: String, name: String)] {
@@ -107,6 +133,19 @@ final class SettingsModel: ObservableObject {
             let id = locale.identifier(.bcp47)
             return (id, Locale.current.localizedString(forIdentifier: locale.identifier) ?? id)
         }
+    }
+
+    /// Which preset the current endpoint matches, so the picker reflects
+    /// hand-edited values instead of lying about them.
+    @Published var presetID: String = "" {
+        didSet {
+            guard let preset = CleanupPreset.all.first(where: { $0.id == presetID }) else { return }
+            apply(preset)
+        }
+    }
+
+    var selectedPreset: CleanupPreset? {
+        CleanupPreset.all.first { $0.baseURL == baseURL }
     }
 
     var localCleanupAvailable: Bool { LocalCleanup.isAvailable }
@@ -155,9 +194,17 @@ private struct SettingsView: View {
                         ForEach(BackendKind.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
                     Picker("Language", selection: $model.locale) {
-                        Text("Automatic").tag("")
+                        Text("Match my system language").tag("")
+                        if model.backend == .whisper {
+                            Text("Detect automatically").tag(Settings.autoDetectLocale)
+                        }
                         Divider()
                         ForEach(model.languages, id: \.id) { Text("\($0.name) — \($0.id)").tag($0.id) }
+                    }
+                    if model.locale == Settings.autoDetectLocale {
+                        Text("Whisper works the language out from what it hears. Slightly slower, and it can guess wrong on a very short phrase — but it handles switching languages mid-sentence.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -175,8 +222,30 @@ private struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     if model.cleanup == .remote {
-                        SecureField("API key", text: $model.apiKey)
-                        Text("Stored in your login keychain. Endpoint: \(Settings.shared.remoteBaseURL)")
+                        Picker("Preset", selection: $model.presetID) {
+                            Text("Custom").tag("")
+                            ForEach(CleanupPreset.all) { Text($0.name).tag($0.id) }
+                        }
+                        if let note = model.selectedPreset?.note {
+                            Text(note).font(.caption).foregroundStyle(.secondary)
+                        }
+
+                        TextField("Endpoint", text: $model.baseURL)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                        TextField("Model", text: $model.remoteModel)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                        SecureField("API key — leave empty for a local server", text: $model.apiKey)
+
+                        HStack {
+                            Button(model.testing ? "Testing…" : "Test") { model.testEndpoint() }
+                                .disabled(model.testing)
+                            if let result = model.testResult {
+                                Text(result).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                            }
+                        }
+                        Text("Any OpenAI-compatible endpoint works. The key is kept in your login keychain, never in preferences.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

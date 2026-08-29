@@ -193,11 +193,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Language
         let languageItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         let languageMenu = NSMenu()
-        let auto = NSMenuItem(title: "Automatic", action: #selector(pickLocale(_:)), keyEquivalent: "")
+        let auto = NSMenuItem(title: "Match my system language", action: #selector(pickLocale(_:)), keyEquivalent: "")
         auto.target = self
         auto.representedObject = ""
         auto.state = Settings.shared.localeIdentifier.isEmpty ? .on : .off
         languageMenu.addItem(auto)
+
+        // Only Whisper can work the language out for itself.
+        if Settings.shared.backend == .whisper {
+            let detect = NSMenuItem(title: "Detect automatically", action: #selector(pickLocale(_:)), keyEquivalent: "")
+            detect.target = self
+            detect.representedObject = Settings.autoDetectLocale
+            detect.state = Settings.shared.localeIdentifier == Settings.autoDetectLocale ? .on : .off
+            languageMenu.addItem(detect)
+        }
         languageMenu.addItem(.separator())
         for locale in Backends.languages(for: Settings.shared.backend) {
             let id = locale.identifier(.bcp47)
