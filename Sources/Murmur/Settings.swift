@@ -36,6 +36,18 @@ enum TriggerKey: String, CaseIterable, Codable {
     }
 }
 
+/// Hold-to-talk, or tap-to-start and tap-to-stop.
+enum ActivationMode: String, CaseIterable, Codable {
+    case hold, toggle
+
+    var label: String {
+        switch self {
+        case .hold:   return "Hold the key"
+        case .toggle: return "Tap to start, tap to stop"
+        }
+    }
+}
+
 /// How the transcript gets cleaned up before it lands in your app.
 enum CleanupMode: String, CaseIterable, Codable {
     case off        // raw transcript, exactly as heard
@@ -75,6 +87,8 @@ final class Settings {
         static let hasLaunched = "hasLaunched"
         static let unloadAfterIdle = "unloadAfterIdle"
         static let useAccessibilityInsert = "useAccessibilityInsert"
+        static let activation = "activation"
+        static let editTrigger = "editTrigger"
         static let idleMinutes = "idleMinutes"
     }
 
@@ -128,6 +142,21 @@ final class Settings {
     var remoteModel: String {
         get { defaults.string(forKey: Key.remoteModel) ?? "llama-3.3-70b-versatile" }
         set { defaults.set(newValue, forKey: Key.remoteModel) }
+    }
+
+    /// Hold the key down, or tap once to start and again to stop.
+    var activation: ActivationMode {
+        get { ActivationMode(rawValue: defaults.string(forKey: Key.activation) ?? "") ?? .hold }
+        set { defaults.set(newValue.rawValue, forKey: Key.activation) }
+    }
+
+    /// Key for rewriting the current selection by voice. Nil disables it.
+    var editTrigger: TriggerKey? {
+        get {
+            guard let raw = defaults.string(forKey: Key.editTrigger), raw != "none" else { return nil }
+            return TriggerKey(rawValue: raw)
+        }
+        set { defaults.set(newValue?.rawValue ?? "none", forKey: Key.editTrigger) }
     }
 
     /// Try the Accessibility API before the pasteboard. Off by default —

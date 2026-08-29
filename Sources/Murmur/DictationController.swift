@@ -36,8 +36,8 @@ final class DictationController {
     var onStatusChange: (Status) -> Void = { _ in }
 
     func start() {
-        hotkey.onPress = { [weak self] in self?.beginDictation() }
-        hotkey.onRelease = { [weak self] in self?.endDictation() }
+        hotkey.onPress = { [weak self] action in self?.keyPressed(action) }
+        hotkey.onRelease = { [weak self] action in self?.keyReleased(action) }
         hotkey.onCancel = { [weak self] in self?.cancelDictation() ?? false }
         armHotkey()
 
@@ -172,10 +172,31 @@ final class DictationController {
     private var lastLevel: Float = 0
     private var maxLevel: Float = 0
     private var context: DictationContext?
+    private var mode: HotkeyMonitor.Action = .dictate
+    private var selection: String?
+
+    // MARK: - Key routing
+
+    /// Hold-to-talk and tap-to-toggle differ only in what a press means when
+    /// something is already running.
+    private func keyPressed(_ action: HotkeyMonitor.Action) {
+        switch Settings.shared.activation {
+        case .hold:
+            beginDictation(mode: action)
+        case .toggle:
+            if status == .listening { endDictation() } else { beginDictation(mode: action) }
+        }
+    }
+
+    private func keyReleased(_ action: HotkeyMonitor.Action) {
+        // In toggle mode the release is meaningless; the next press ends it.
+        guard Settings.shared.activation == .hold else { return }
+        endDictation()
+    }
 
     // MARK: - The loop
 
-    private func beginDictation() {
+    private func beginDictation(mode: HotkeyMonitor.Action = .dictate) {
         let context = DictationContext.current()
         Log.write("key down (status=\(status), front app=\(context.appName) [\(context.kind.rawValue)])")
         guard status == .idle else { Log.write("  ignored — not idle"); return }
@@ -188,11 +209,27 @@ final class DictationController {
         maxLevel = 0
         // Captured now, not at injection: this is the app you meant to talk to.
         self.context = context
+        self.mode = mode
+        self.selection = nil
+        overlay.setPlaceholder(mode == .edit ? "Say what to do with the selection…" : "Listening…")
         overlay.show(.listening(text: "", level: 0))
         if Settings.shared.playSounds { NSSound(named: "Pop")?.play() }
 
         generation += 1
         let generation = self.generation
+
+        if mode == .edit {
+            Task { @MainActor in
+                // Read the selection before the user starts talking — by the
+                // time they finish, focus or selection may well have moved.
+                selection = await TextInjector.copySelection()
+                if selection == nil, status == .listening {
+                    Log.write("  edit aborted — nothing selected")
+                    setStatus(.idle)
+                    overlay.flash(.notice("Select some text first"), seconds: 2)
+                }
+            }
+        }
 
         Task { @MainActor in
             do {
@@ -285,20 +322,41 @@ final class DictationController {
             }
 
             var cleaned = raw
-            let mode = Settings.shared.cleanup
-            if mode != .off {
+            let cleanupMode = Settings.shared.cleanup
+
+            if self.mode == .edit {
+                guard let selection else {
+                    setStatus(.idle)
+                    overlay.flash(.notice("Nothing was selected"), seconds: 2)
+                    return
+                }
                 do {
-                    cleaned = try await Cleanup.provider(for: mode)
+                    cleaned = try await Cleanup.provider(for: cleanupMode)
+                        .rewrite(selection, instruction: raw)
+                    Log.write("  rewrote \(selection.count) chars → \(cleaned.count)")
+                } catch {
+                    // Unlike cleanup, there's no safe fallback here: pasting
+                    // the raw instruction would destroy the selected text.
+                    Log.write("  rewrite failed: \(error.localizedDescription)")
+                    setStatus(.idle)
+                    overlay.flash(.error(error.localizedDescription), seconds: 4)
+                    return
+                }
+            } else if cleanupMode != .off {
+                do {
+                    cleaned = try await Cleanup.provider(for: cleanupMode)
                         .clean(raw, vocabulary: Settings.shared.vocabulary, context: context)
                 } catch {
                     // Cleanup is a nicety. Never lose the words over it.
-                    NSLog("Murmur: cleanup failed, pasting raw — \(error.localizedDescription)")
+                    Log.write("  cleanup failed, pasting raw — \(error.localizedDescription)")
                     cleaned = raw
                 }
             }
 
             // Esc may have landed while the cleanup model was still thinking.
             guard !cancelled else { return }
+
+            Stats.shared.record(text: cleaned, duration: duration)
 
             if Settings.shared.saveHistory {
                 History.shared.add(Dictation(date: Date(), raw: raw, cleaned: cleaned, duration: duration))

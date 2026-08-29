@@ -52,6 +52,12 @@ if CommandLine.arguments.contains("--focus") {
     dispatchMain()
 }
 
+if let instruction = flagValue("--test-edit") {
+    let delay = Double(flagValue("--delay") ?? "") ?? 4
+    Task { @MainActor in await Diagnostics.testEdit(instruction, delay: delay); exit(0) }
+    dispatchMain()
+}
+
 if CommandLine.arguments.contains("--test-cleanup") {
     Task { @MainActor in await Diagnostics.testCleanup(); exit(0) }
     dispatchMain()

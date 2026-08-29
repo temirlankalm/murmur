@@ -197,8 +197,8 @@ enum Diagnostics {
         let monitor = HotkeyMonitor()
         var sawPress = false
         var sawRelease = false
-        monitor.onPress = { sawPress = true }
-        monitor.onRelease = { sawRelease = true }
+        monitor.onPress = { _ in sawPress = true }
+        monitor.onRelease = { _ in sawRelease = true }
         monitor.start()
 
         guard monitor.isRunning else {
@@ -277,6 +277,34 @@ enum Diagnostics {
         print("model:    \(Settings.shared.remoteModel)")
         print("key:      \(Keychain.get(RemoteCleanup.keychainAccount)?.isEmpty == false ? "set" : "none (fine for a local server)")")
         print(await RemoteCleanup().test())
+    }
+
+    /// `Murmur --test-edit "make this formal"` — selects all in the frontmost
+    /// app and runs the voice-edit path with the instruction typed instead of
+    /// spoken. Exercises everything but the microphone.
+    @MainActor
+    static func testEdit(_ instruction: String, delay: Double) async {
+        print("focus the text you want rewritten — starting in \(Int(delay))s…")
+        try? await Task.sleep(for: .seconds(delay))
+
+        TextInjector.selectAll()
+        try? await Task.sleep(for: .milliseconds(200))
+
+        guard let selection = await TextInjector.copySelection() else {
+            print("nothing selected — the app returned no text")
+            return
+        }
+        print("selection: \(selection.count) chars — \(selection.prefix(60))")
+
+        do {
+            let rewritten = try await Cleanup.provider(for: Settings.shared.cleanup)
+                .rewrite(selection, instruction: instruction)
+            print("rewritten: \(rewritten)")
+            TextInjector.insert(rewritten)
+            print("injected")
+        } catch {
+            print("failed: \(error.localizedDescription)")
+        }
     }
 
     static func listModels() {

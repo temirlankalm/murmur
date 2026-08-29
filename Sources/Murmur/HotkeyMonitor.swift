@@ -7,15 +7,20 @@ import CoreGraphics
 /// right ⌥ still behaves normally in whatever app has focus.
 @MainActor
 final class HotkeyMonitor {
-    var onPress: () -> Void = {}
-    var onRelease: () -> Void = {}
+    /// Which of the two things a key press starts.
+    enum Action { case dictate, edit }
+
+    var onPress: (Action) -> Void = { _ in }
+    var onRelease: (Action) -> Void = { _ in }
     /// Esc while dictating. Return true if it was consumed, so we can keep the
     /// keystroke from also reaching whatever app is in front.
     var onCancel: () -> Bool = { false }
 
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
-    private var isDown = false
+    /// Tracked per action: the two keys can be pressed independently, and one
+    /// shared flag would make the second press look like a release of the first.
+    private var down: Set<Action> = []
 
     private static let modifierNames: [Int64: String] = [
         54: "Right ⌘", 55: "Left ⌘", 56: "Left ⇧", 57: "Caps Lock",
@@ -70,7 +75,7 @@ final class HotkeyMonitor {
         }
         tap = nil
         source = nil
-        isDown = false
+        down = []
     }
 
     /// The tap gets disabled by the system if we ever stall. Re-arm it.
@@ -95,23 +100,37 @@ final class HotkeyMonitor {
 
         guard type == .flagsChanged else { return false }
 
-        let trigger = Settings.shared.trigger
-        guard keyCode == trigger.keyCode else {
+        // The edit key is optional; when unset only dictation is bound.
+        let bindings: [(action: Action, key: TriggerKey)] = {
+            var result: [(Action, TriggerKey)] = [(.dictate, Settings.shared.trigger)]
+            if let edit = Settings.shared.editTrigger, edit != Settings.shared.trigger {
+                result.append((.edit, edit))
+            }
+            return result
+        }()
+
+        guard let binding = bindings.first(where: { $0.key.keyCode == keyCode }) else {
             // Log the near-misses too. When someone says the hotkey does
             // nothing, the usual answer is that they're pressing a different
             // key from the configured one, and this is the only way to see it.
             // Modifier keycodes only — no characters are recorded.
-            if Self.modifierNames[keyCode] != nil {
-                Log.write("modifier \(Self.modifierNames[keyCode] ?? "?") (keycode \(keyCode)) — trigger is \(trigger.label) (keycode \(trigger.keyCode))")
+            if let name = Self.modifierNames[keyCode] {
+                let bound = bindings.map { "\($0.key.label)" }.joined(separator: " / ")
+                Log.write("modifier \(name) (keycode \(keyCode)) — bound keys are \(bound)")
             }
             return false
         }
 
         // On a flagsChanged for our key, the flag being set means "pressed".
-        let pressed = event.flags.contains(trigger.flag)
-        guard pressed != isDown else { return false }
-        isDown = pressed
-        pressed ? onPress() : onRelease()
+        let pressed = event.flags.contains(binding.key.flag)
+        guard pressed != down.contains(binding.action) else { return false }
+        if pressed {
+            down.insert(binding.action)
+            onPress(binding.action)
+        } else {
+            down.remove(binding.action)
+            onRelease(binding.action)
+        }
         return false
     }
 }
