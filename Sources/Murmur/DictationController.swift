@@ -171,12 +171,13 @@ final class DictationController {
 
     private var lastLevel: Float = 0
     private var maxLevel: Float = 0
+    private var context: DictationContext?
 
     // MARK: - The loop
 
     private func beginDictation() {
-        let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"
-        Log.write("key down (status=\(status), front app=\(front))")
+        let context = DictationContext.current()
+        Log.write("key down (status=\(status), front app=\(context.appName) [\(context.kind.rawValue)])")
         guard status == .idle else { Log.write("  ignored — not idle"); return }
         idleUnload?.cancel()
         setStatus(.listening)
@@ -185,6 +186,8 @@ final class DictationController {
         captureStarted = false
         cancelled = false
         maxLevel = 0
+        // Captured now, not at injection: this is the app you meant to talk to.
+        self.context = context
         overlay.show(.listening(text: "", level: 0))
         if Settings.shared.playSounds { NSSound(named: "Pop")?.play() }
 
@@ -286,7 +289,7 @@ final class DictationController {
             if mode != .off {
                 do {
                     cleaned = try await Cleanup.provider(for: mode)
-                        .clean(raw, vocabulary: Settings.shared.vocabulary)
+                        .clean(raw, vocabulary: Settings.shared.vocabulary, context: context)
                 } catch {
                     // Cleanup is a nicety. Never lose the words over it.
                     NSLog("Murmur: cleanup failed, pasting raw — \(error.localizedDescription)")

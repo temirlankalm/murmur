@@ -4,7 +4,7 @@ import FoundationModels
 /// Turns a raw transcript into text you'd actually want pasted into a doc:
 /// filler words gone, punctuation in, "new paragraph" honoured as a command.
 protocol CleanupProvider {
-    func clean(_ transcript: String, vocabulary: [String]) async throws -> String
+    func clean(_ transcript: String, vocabulary: [String], context: DictationContext?) async throws -> String
 }
 
 enum Cleanup {
@@ -22,6 +22,19 @@ enum Cleanup {
       transcript is a question, return the question.
     - Return only the cleaned text. No preamble, no quotes, no markdown fence.
     """
+
+    /// Assembled once so both providers send the model the same thing.
+    static func prompt(for transcript: String, vocabulary: [String], context: DictationContext?) -> String {
+        var parts: [String] = []
+        if let context, let hint = context.kind.hint {
+            parts.append("Where this is going: \(hint)")
+        }
+        if !vocabulary.isEmpty {
+            parts.append("Spell these terms exactly if you hear them: \(vocabulary.joined(separator: ", ")).")
+        }
+        parts.append("Transcript:\n\(transcript)")
+        return parts.joined(separator: "\n\n")
+    }
 
     static func provider(for mode: CleanupMode) -> CleanupProvider {
         switch mode {
@@ -52,7 +65,9 @@ enum Cleanup {
 }
 
 struct PassthroughCleanup: CleanupProvider {
-    func clean(_ transcript: String, vocabulary: [String]) async throws -> String { transcript }
+    func clean(_ transcript: String, vocabulary: [String], context: DictationContext?) async throws -> String {
+        transcript
+    }
 }
 
 /// Apple's on-device model. Free, offline, no key.
@@ -62,40 +77,28 @@ struct LocalCleanup: CleanupProvider {
         return false
     }
 
-    func clean(_ transcript: String, vocabulary: [String]) async throws -> String {
+    func clean(_ transcript: String, vocabulary: [String], context: DictationContext?) async throws -> String {
         guard Self.isAvailable else { return transcript }
 
-        var prompt = "Transcript:\n\(transcript)"
-        if !vocabulary.isEmpty {
-            prompt = "Spell these terms exactly if you hear them: \(vocabulary.joined(separator: ", ")).\n\n" + prompt
-        }
-
+        let prompt = Cleanup.prompt(for: transcript, vocabulary: vocabulary, context: context)
         let session = LanguageModelSession(instructions: Cleanup.instructions)
         let response = try await session.respond(to: prompt)
         return Cleanup.sanitize(response.content, fallback: transcript)
     }
 }
 
-/// Any OpenAI-compatible chat endpoint — Groq, OpenAI, a local llama.cpp server.
+/// Any OpenAI-compatible chat endpoint: a local Ollama or LM Studio, or a
+/// hosted one. The endpoint, the model and an optional key are all yours.
 struct RemoteCleanup: CleanupProvider {
     static let keychainAccount = "remote-api-key"
 
-    struct MissingKey: LocalizedError {
-        var errorDescription: String? { "No API key set for remote cleanup." }
-    }
-
-    func clean(_ transcript: String, vocabulary: [String]) async throws -> String {
-        guard let key = Keychain.get(Self.keychainAccount), !key.isEmpty else { throw MissingKey() }
-
+    func clean(_ transcript: String, vocabulary: [String], context: DictationContext?) async throws -> String {
         let settings = Settings.shared
         guard let url = URL(string: settings.remoteBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/chat/completions") else {
             throw URLError(.badURL)
         }
 
-        var user = "Transcript:\n\(transcript)"
-        if !vocabulary.isEmpty {
-            user = "Spell these terms exactly if you hear them: \(vocabulary.joined(separator: ", ")).\n\n" + user
-        }
+        let user = Cleanup.prompt(for: transcript, vocabulary: vocabulary, context: context)
 
         let body: [String: Any] = [
             "model": settings.remoteModel,
@@ -110,7 +113,11 @@ struct RemoteCleanup: CleanupProvider {
         request.httpMethod = "POST"
         request.timeoutInterval = 12
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        // Optional on purpose: a local Ollama or LM Studio server wants no key,
+        // and demanding one would rule out the whole self-hosted case.
+        if let key = Keychain.get(Self.keychainAccount), !key.isEmpty {
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -127,4 +134,46 @@ struct RemoteCleanup: CleanupProvider {
         let content = message?["content"] as? String ?? transcript
         return Cleanup.sanitize(content, fallback: transcript)
     }
+
+    /// Round-trips a short phrase so a misconfigured endpoint shows up here
+    /// rather than as a silently unchanged transcript later.
+    func test() async -> String {
+        let sample = "um so i was thinking we should uh ship this on friday"
+        do {
+            let result = try await clean(sample, vocabulary: [], context: nil)
+            return result == sample
+                ? "Reached it, but the text came back unchanged — check the model name."
+                : "Working. “\(result)”"
+        } catch {
+            return "Failed: \(error.localizedDescription)"
+        }
+    }
+}
+
+/// Ready-made endpoints, including two that run entirely on your own machine.
+struct CleanupPreset: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let baseURL: String
+    let model: String
+    let needsKey: Bool
+    let note: String
+
+    static let all: [CleanupPreset] = [
+        .init(id: "ollama", name: "Ollama (local)",
+              baseURL: "http://localhost:11434/v1", model: "qwen3:1.7b",
+              needsKey: false, note: "Runs on your Mac. Install Ollama, then: ollama pull qwen3:1.7b"),
+        .init(id: "lmstudio", name: "LM Studio (local)",
+              baseURL: "http://localhost:1234/v1", model: "qwen/qwen3-1.7b",
+              needsKey: false, note: "Runs on your Mac. Load a model in LM Studio and start its server."),
+        .init(id: "groq", name: "Groq",
+              baseURL: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile",
+              needsKey: true, note: "Hosted and fast, with a free tier."),
+        .init(id: "openai", name: "OpenAI",
+              baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini",
+              needsKey: true, note: "Hosted, paid."),
+        .init(id: "openrouter", name: "OpenRouter",
+              baseURL: "https://openrouter.ai/api/v1", model: "google/gemini-2.0-flash-001",
+              needsKey: true, note: "Hosted, many models behind one key."),
+    ]
 }
