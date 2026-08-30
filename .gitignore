@@ -4,3 +4,4 @@ Murmur.app/
 *.xcuserstate
 .signing-identity
 tools/makeicon
+dist/

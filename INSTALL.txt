@@ -1,0 +1,43 @@
+Murmur — hold a key, talk, get clean text in any app.
+
+INSTALLING
+
+1. Drag Murmur into the Applications folder.
+
+2. macOS will refuse to open it the first time: "Murmur cannot be opened
+   because the developer cannot be verified", or "Murmur is damaged".
+   Neither is true — the app just isn't notarised by Apple, which needs a
+   paid Developer Program membership.
+
+   To clear it, open Terminal and run:
+
+       xattr -dr com.apple.quarantine /Applications/Murmur.app
+
+   Then open Murmur normally. You only have to do this once.
+
+3. Murmur asks for two permissions, and needs both:
+
+     Microphone     — to hear you
+     Accessibility  — to watch for the trigger key and type into other apps
+
+   Accessibility has to be granted by hand in System Settings →
+   Privacy & Security → Accessibility. If Murmur isn't in the list, drag
+   it in from Applications.
+
+USING IT
+
+Hold right Option, speak, let go. The text is typed at your cursor.
+Press Esc while speaking to throw it away.
+
+There's no window and no Dock icon — Murmur lives in the menu bar. If you
+can't see its icon (a full menu bar on a notched MacBook hides it), open
+the settings window from Terminal:
+
+    open murmur://settings
+
+REQUIREMENTS
+
+macOS 26 or later, Apple Silicon.
+
+Source, and an explanation of every setting:
+https://github.com/temirlankalm/murmur

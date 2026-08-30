@@ -44,6 +44,41 @@ state — waveform, listening, thinking.
 The only dependency is [WhisperKit](https://github.com/argmaxinc/WhisperKit),
 and only for the Whisper engine.
 
+## Installing a build someone sent you
+
+Drag Murmur into Applications, then clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Murmur.app
+```
+
+Without that, macOS refuses to open it — "the developer cannot be verified",
+or misleadingly, "Murmur is damaged". Neither is true. Murmur isn't notarised
+by Apple, and notarisation needs a paid Developer Program membership. You can
+check what Gatekeeper thinks of any build:
+
+```bash
+spctl -a -vv /Applications/Murmur.app
+```
+
+An unnotarised build reports `rejected`, with the signing identity as its
+origin. The signature itself is still valid, which is why clearing the flag is
+enough.
+
+## Making a DMG
+
+```bash
+./package.sh
+```
+
+Writes `dist/Murmur-<version>.dmg` with the app, an Applications symlink and
+the install notes, and prints the SHA-256 so you can publish a checksum.
+
+To distribute properly rather than asking people to run `xattr`, you need an
+Apple Developer Program membership: sign with a Developer ID Application
+certificate, then `xcrun notarytool submit` and `xcrun stapler staple`. Point
+`MURMUR_SIGN_ID` at the Developer ID certificate and `package.sh` picks it up.
+
 ## Build and run
 
 ```bash
