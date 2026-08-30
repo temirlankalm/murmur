@@ -18,6 +18,23 @@ Two speech engines, switchable from the menu bar:
 Apple's engine is the default. Switch to Whisper if your language isn't in
 Apple's list — Russian, Arabic, Hindi and most others aren't.
 
+## The logo
+
+A hand-drawn cat, because the app is called Murmur. The source is
+`Assets/logo.pdf`; everything else is generated from it:
+
+```bash
+swift tools/makeicon.swift Assets/logo.pdf /tmp/AppIcon.iconset
+iconutil -c icns /tmp/AppIcon.iconset -o Assets/AppIcon.icns
+```
+
+The generator finds the drawing inside the page, drops the page's own pale
+background so it doesn't show as a rectangle inside the icon's rounded plate,
+and lays the cat on a macOS-style squircle. It also emits a transparent
+template pair for the menu bar (`Assets/menubar*.png`), unused for now: at 18pt
+the drawing turns to mush, and the status item earns its keep by changing with
+state — waveform, listening, thinking.
+
 ## Requirements
 
 - macOS 26 or later (uses the `SpeechAnalyzer` API added in macOS 26)
