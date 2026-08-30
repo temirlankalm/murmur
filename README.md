@@ -205,6 +205,10 @@ ollama pull qwen3:1.7b
 
 then pick **Ollama (local)** in the settings window and press Test.
 
+Preset model names go stale — hosted providers retire them, and a dead name
+fails as an unhelpful 404 that looks like cleanup quietly doing nothing. Check
+what an endpoint actually serves with `--remote-models`.
+
 **Pick the model on latency, not size.** Cleanup sits between you releasing the
 key and the text appearing, so a reasoning model is the wrong tool. On the same
 Russian sentence, Groq's `gpt-oss-120b` took 8.0s and `gpt-oss-20b` took 1.0s —

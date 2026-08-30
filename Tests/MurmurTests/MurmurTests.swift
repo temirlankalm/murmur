@@ -136,6 +136,15 @@ import Foundation
     #expect(local.allSatisfy { $0.baseURL.contains("localhost") })
 }
 
+@Test func presetsAvoidRetiredModelNames() {
+    // llama-3.3-70b-versatile shipped as the Groq default and had already been
+    // retired: the endpoint answers 404 and cleanup silently does nothing.
+    let retired = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]
+    for preset in CleanupPreset.all {
+        #expect(!retired.contains(preset.model), "\(preset.id) names a retired model")
+    }
+}
+
 @Test func everyPresetIsAUsableEndpoint() {
     for preset in CleanupPreset.all {
         #expect(URL(string: preset.baseURL + "/chat/completions") != nil, "bad URL in \(preset.id)")

@@ -223,6 +223,13 @@ struct RemoteCleanup: CleanupProvider {
 }
 
 /// Ready-made endpoints, including two that run entirely on your own machine.
+///
+/// Model names go stale — hosted providers retire them without warning, and a
+/// dead name fails as an unhelpful 404. `--remote-models` asks an endpoint what
+/// it currently serves. Prefer small, non-reasoning models here: cleanup sits
+/// between releasing the key and the text appearing, so latency is the whole
+/// game. On Groq the same sentence took 8.0s on gpt-oss-120b and 1.0s on
+/// gpt-oss-20b, for identical output.
 struct CleanupPreset: Identifiable, Hashable {
     let id: String
     let name: String
@@ -239,7 +246,7 @@ struct CleanupPreset: Identifiable, Hashable {
               baseURL: "http://localhost:1234/v1", model: "qwen/qwen3-1.7b",
               needsKey: false, note: "Runs on your Mac. Load a model in LM Studio and start its server."),
         .init(id: "groq", name: "Groq",
-              baseURL: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile",
+              baseURL: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-20b",
               needsKey: true, note: "Hosted and fast, with a free tier."),
         .init(id: "openai", name: "OpenAI",
               baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini",

@@ -141,7 +141,7 @@ final class Settings {
     }
 
     var remoteModel: String {
-        get { defaults.string(forKey: Key.remoteModel) ?? "llama-3.3-70b-versatile" }
+        get { defaults.string(forKey: Key.remoteModel) ?? "openai/gpt-oss-20b" }
         set { defaults.set(newValue, forKey: Key.remoteModel) }
     }
 
