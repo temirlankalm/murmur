@@ -104,16 +104,32 @@ final class WhisperBackend: SpeechBackend {
             return
         }
 
-        progress("Preparing Whisper — first run downloads the model…")
+        // Fetch the model ourselves rather than letting the initialiser do it,
+        // purely so there's something to report: it's a few hundred megabytes,
+        // and a silent wait that long is indistinguishable from a hang.
+        progress("Finding the Whisper model…")
+        var lastPercent = -1
+        let folder = try await WhisperKit.download(
+            variant: wanted,
+            downloadBase: Self.downloadBase
+        ) { fetch in
+            let percent = Int(fetch.fractionCompleted * 100)
+            guard percent != lastPercent else { return }
+            lastPercent = percent
+            Task { @MainActor in progress("Downloading Whisper model — \(percent)%") }
+        }
+
+        progress("Loading the model…")
         let config = WhisperKitConfig(
             model: wanted,
             downloadBase: Self.downloadBase,
+            modelFolder: folder.path,
             tokenizerFolder: Self.downloadBase.appendingPathComponent("tokenizers"),
             verbose: false,
             logLevel: .error,
             prewarm: false,
             load: true,
-            download: true
+            download: false
         )
         // First run pulls the model from HuggingFace; that can take minutes.
         let task = Task { try await WhisperKit(config) }

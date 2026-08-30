@@ -330,6 +330,24 @@ enum Diagnostics {
         }
     }
 
+    /// `Murmur --warm <model>` — fetches and loads a model, printing progress.
+    /// Leaves the saved settings alone.
+    @MainActor
+    static func warm(_ model: String) async {
+        let saved = Settings.shared.whisperModel
+        Settings.shared.whisperModel = model
+        defer { Settings.shared.whisperModel = saved }
+
+        let backend = WhisperBackend()
+        let started = Date()
+        do {
+            try await backend.prepare(locale: Locale(identifier: "en-US")) { print("  \($0)") }
+            print(String(format: "ready in %.1fs", Date().timeIntervalSince(started)))
+        } catch {
+            print("failed: \(error.localizedDescription)")
+        }
+    }
+
     static func listModels() {
         let support = WhisperKit.recommendedModels()
         print("recommended default: \(support.default)")

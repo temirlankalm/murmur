@@ -266,9 +266,12 @@ your previous clipboard afterwards.
 - **Without a signing identity the build is ad-hoc signed**, and the
   Accessibility grant silently stops working after every rebuild — the checkbox
   stays ticked while the permission does nothing. See below.
-- **First dictation in a new language downloads a model.** Apple's are small;
-  Whisper's are a few hundred MB. Both land in
-  `~/Library/Application Support/Murmur`.
+- **First launch downloads a model** — Apple's are small, Whisper's default is
+  about 630 MB. It happens at startup with a progress readout in the overlay,
+  and takes a few minutes on a slow connection. Both land in
+  `~/Library/Application Support/Murmur`. Pick a smaller model in settings
+  (`openai_whisper-base` is ~150 MB) if that's too much, or if the Mac is old
+  enough that the big one decodes slowly.
 
 ## Making permissions stick
 

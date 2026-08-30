@@ -58,6 +58,11 @@ if let instruction = flagValue("--test-edit") {
     dispatchMain()
 }
 
+if let model = flagValue("--warm") {
+    Task { @MainActor in await Diagnostics.warm(model); exit(0) }
+    dispatchMain()
+}
+
 if CommandLine.arguments.contains("--remote-models") {
     Task { @MainActor in await Diagnostics.listRemoteModels(); exit(0) }
     dispatchMain()

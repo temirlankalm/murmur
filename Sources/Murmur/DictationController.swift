@@ -88,7 +88,16 @@ final class DictationController {
             guard let self else { return }
             let locale = await Backends.resolveLocale(for: kind)
             do {
-                try await self.backend.prepare(locale: locale) { _ in }
+                // First launch downloads a few hundred megabytes. Say so —
+                // this used to discard the progress entirely, which made a new
+                // install look like a broken one.
+                try await self.backend.prepare(locale: locale) { [weak self] message in
+                    guard let self else { return }
+                    Log.write("  warm-up: \(message)")
+                    guard self.status == .idle else { return }
+                    self.overlay.show(.preparing(message))
+                }
+                if self.status == .idle { self.overlay.show(.hidden) }
                 // Guard against the engine being switched mid-load.
                 if self.backendKind == kind {
                     self.assetsReady = true
@@ -241,7 +250,9 @@ final class DictationController {
                 // the user lose the sentence they're already saying.
                 if backend.needsModelBeforeCapture, !assetsReady {
                     try await backend.prepare(locale: locale) { [weak self] message in
-                        guard let self, self.status == .listening else { return }
+                        guard let self else { return }
+                        Log.write("  \(message)")
+                        guard self.status == .listening else { return }
                         self.overlay.show(.preparing(message))
                     }
                     assetsReady = true
