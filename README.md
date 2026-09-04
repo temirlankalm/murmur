@@ -18,6 +18,26 @@ Two speech engines, switchable from the menu bar:
 Apple's engine is the default. Switch to Whisper if your language isn't in
 Apple's list — Russian, Arabic, Hindi and most others aren't.
 
+## Quickstart
+
+```bash
+git clone https://github.com/temirlankalm/murmur.git && cd murmur
+./build.sh --release && open Murmur.app
+./Murmur.app/Contents/MacOS/Murmur --check
+```
+
+The first command needs Xcode 26; the second takes about a minute and prints
+which certificate it signed with. The third tells you what still isn't wired
+up.
+
+One step can't be scripted: **Accessibility has to be granted by hand** in
+System Settings → Privacy & Security → Accessibility — macOS won't let an app
+grant that to itself. Drag `Murmur.app` into the list, and `--check` turns
+green. The microphone prompt appears on its own.
+
+First dictation downloads a speech model (~630 MB by default, with a progress
+readout). Then hold right ⌥, speak, and let go.
+
 ## The logo
 
 A hand-drawn cat, because the app is called Murmur. The source is
@@ -226,11 +246,65 @@ useful to say about style add nothing to the prompt.
 ## How it works
 
 ```
-right ⌥ down ──▶ CGEventTap ──▶ AVAudioEngine ──▶ resample ──▶ speech backend
-                                                                     │
-                                                      live partial text ──▶ overlay
-right ⌥ up ────▶ finalize ──▶ cleanup model ──▶ AX insert / ⌘V ──▶ your app
+  hold ⌥                                                        release ⌥
+     │                                                              │
+     ▼                                                              ▼
+┌──────────────┐                                            ┌──────────────┐
+│  audio in    │  AVAudioEngine tap on the default input.   │  finalise    │
+│              │  Each buffer is copied off the audio       │              │
+│              │  thread — the engine reuses it.            └──────┬───────┘
+└──────┬───────┘                                                   │
+       ▼                                                           │
+┌──────────────┐                                                   │
+│  resample    │  AVAudioConverter → 16 kHz mono float,            │
+│              │  the format Whisper wants.                        │
+└──────┬───────┘                                                   │
+       ▼                                                           │
+┌──────────────┐                                                   │
+│  level gate  │  Loudest 100 ms window must clear 0.004.          │
+│              │  Room tone measures ~0.002, speech ~0.2.          │
+│              │  Below the floor the model is never called:       │
+│              │  asked to transcribe silence, Whisper invents     │
+│              │  closing credits.                                 │
+└──────┬───────┘                                                   │
+       │                                                           │
+       ├───── every 1.8 s, last 30 s ──┐                           │
+       │                               ▼                           ▼
+       │                        ┌─────────────────────────────────────┐
+       └───────────────────────▶│              model                  │
+                                │  Apple SpeechAnalyzer — streams,    │
+                                │  9 languages                        │
+                                │  WhisperKit — batch, ~99 languages  │
+                                └───────┬──────────────────┬──────────┘
+                                        │                  │
+                                 partial text        final transcript
+                                        │                  │
+                                        ▼                  ▼
+                                 ┌────────────┐    ┌──────────────┐
+                                 │  overlay   │    │  cleanup     │  optional LLM:
+                                 └────────────┘    │              │  punctuation,
+                                                   │              │  fillers, and
+                                                   │              │  formatting for
+                                                   │              │  the target app
+                                                   └──────┬───────┘
+                                                          ▼
+                                                   ┌──────────────┐
+                                                   │  text out    │  Accessibility
+                                                   │              │  insert, else
+                                                   │              │  clipboard + ⌘V
+                                                   └──────┬───────┘
+                                                          ▼
+                                                    the focused app
 ```
+
+Two things that diagram is deliberately honest about. There is **no VAD**: the
+gate is plain energy over a 100 ms window, which is enough to tell speech from
+an empty room but won't find sentence boundaries. And there is **no real
+chunking**: live text re-decodes the tail of the recording rather than
+decoding fresh segments, and the final pass runs over the whole buffer in one
+go. WhisperKit can do VAD-based chunking (`DecodingOptions.chunkingStrategy`)
+and Murmur doesn't use it — worth revisiting for dictations longer than a
+minute or two.
 
 | File | Does |
 | --- | --- |
