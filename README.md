@@ -380,6 +380,11 @@ Certificate Assistant makes an *untrusted* root, so it shows as
 `build.sh` signs by the certificate's SHA-1, which works regardless, and pins
 the choice in `.signing-identity` so rebuilds keep using the same one.
 
+**Make exactly one certificate.** If several share the name, `build.sh` pins
+whichever it happens to find first — and `.signing-identity` isn't in git, so
+a fresh clone can pin a different one, change the designated requirement, and
+lose the Accessibility grant. Delete the spares in Keychain Access.
+
 What matters is the designated requirement. Ad-hoc gives you
 `cdhash H"…"`, which changes with every build. The certificate gives
 `identifier "com.murmur.dictation" and certificate leaf = H"…"`, which doesn't.
